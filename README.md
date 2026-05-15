@@ -1,12 +1,13 @@
-# CrewAI 多 Agent 协作 Demo
+# CrewAI 通用问题解决多 Agent Demo
 
-这个 Demo 用 CrewAI 搭了一个小型“AI 产品团队”：
+这个 Demo 用 CrewAI 搭了一个小型“通用问题解决团队”：
 
-- `Researcher`：分析用户需求和场景
-- `Architect`：设计产品方案和技术流程
-- `Reviewer`：检查风险、遗漏和可改进点
+- `Problem Analyst`：拆解问题背景、目标、约束、关键矛盾和成功标准
+- `Solution Strategist`：基于问题分析设计可执行的解决方案
+- `Critical Reviewer`：审查方案风险、遗漏、脆弱假设和过度设计
+- `Executive Summarizer`：在完整报告之外额外生成一份精简报告
 
-默认示例任务是：为“个人知识库助手”生成一份产品方案。你可以在运行时传入自己的主题。
+默认示例任务是：分析并解决一个需要多方权衡的复杂问题。你可以在运行时传入自己的主题。
 
 ## 项目内依赖策略
 
@@ -60,7 +61,8 @@ OTEL_SDK_DISABLED=true
 传入自定义主题：
 
 ```powershell
-.\.venv\Scripts\python.exe .\src\main.py "给独立开发者做一个自动化竞品分析工具"
+.\.venv\Scripts\python.exe .\src\main.py "如何降低一个小团队的软件交付延期风险"
 ```
 
-结果会打印到终端，并保存到 `outputs/latest_result.md`。
+完整报告会打印到终端，并保存到 `outputs/latest_result.md`。
+精简报告会额外打印到终端，并保存到 `outputs/latest_summary.md`。

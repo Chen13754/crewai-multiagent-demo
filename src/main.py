@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "outputs"
 OUTPUT_FILE = OUTPUT_DIR / "latest_result.md"
+SUMMARY_FILE = OUTPUT_DIR / "latest_summary.md"
 CREWAI_STORAGE_DIR = ROOT / ".cache" / "crewai"
 LOCAL_APP_DATA = ROOT / ".cache" / "localappdata"
 
@@ -26,6 +27,12 @@ os.environ.setdefault("CREWAI_TESTING", "true")
 from crewai import Agent, Crew, Process, Task
 
 
+def task_output_text(task_output: object) -> str:
+    # CrewAI 的任务输出通常有 raw 字段；如果版本不同，就退回到字符串形式。
+    raw = getattr(task_output, "raw", None)
+    return str(raw if raw is not None else task_output)
+
+
 def build_crew(topic: str) -> Crew:
     # 优先使用环境变量中显式配置的模型；如果没有配置，则使用 DeepSeek 默认模型。
     model_name = (
@@ -35,25 +42,25 @@ def build_crew(topic: str) -> Crew:
         or "deepseek/deepseek-v4-flash"
     )
 
-    # 第一个 agent：把宽泛或模糊的产品想法拆解为具体的用户、场景、痛点和成功标准。
-    researcher = Agent(
-        role="Researcher",
-        goal="把模糊想法拆成清晰的用户、场景、痛点和成功标准。",
+    # 第一个 agent：把问题背景拆解清楚，识别目标、约束、相关方和关键矛盾。
+    analyst = Agent(
+        role="Problem Analyst",
+        goal="把模糊问题拆成清晰的背景、目标、约束、关键矛盾和判断标准。",
         backstory=(
-            "你是一名偏实战的产品研究员，擅长从一句需求里识别目标用户、"
-            "关键使用场景、约束条件和最小可行版本。"
+            "你是一名擅长结构化思考的问题分析师，能够从不完整描述中梳理事实、"
+            "假设、未知信息、利益相关方、限制条件和优先级。"
         ),
         llm=model_name,
         verbose=True,
     )
 
-    # 第二个 agent：把研究结果转化为可实现、可演示的多 agent 产品架构。
-    architect = Agent(
-        role="Solution Architect",
-        goal="基于研究结论设计一个可演示、可实现的多 agent 产品方案。",
+    # 第二个 agent：基于问题分析提出可执行的解决方案和实施路径。
+    solver = Agent(
+        role="Solution Strategist",
+        goal="基于问题分析设计可执行、可验证、成本可控的解决方案。",
         backstory=(
-            "你是一名工程背景很强的产品架构师，喜欢把方案落到模块、流程、"
-            "数据结构、工具接口和演示步骤上。"
+            "你是一名务实的解决方案专家，习惯把抽象目标落到策略选项、"
+            "执行步骤、资源需求、里程碑和验证方式上。"
         ),
         llm=model_name,
         verbose=True,
@@ -62,53 +69,79 @@ def build_crew(topic: str) -> Crew:
     # 第三个 agent：审查方案中的实际风险、模糊假设、过度复杂度和缺失约束。
     reviewer = Agent(
         role="Critical Reviewer",
-        goal="发现方案中的风险、含糊点和过度设计，并给出务实改进建议。",
+        goal="发现解决方案中的风险、遗漏、脆弱假设和过度设计，并给出务实改进建议。",
         backstory=(
-            "你是一名严谨的技术评审，关注边界条件、成本、失败场景、"
-            "可观测性和用户真正能体验到的价值。"
+            "你是一名严谨的评审者，关注边界条件、机会成本、失败场景、"
+            "可观测指标和真实可落地性。"
         ),
         llm=model_name,
         verbose=True,
     )
 
-    # 任务 1 不依赖前置上下文，用于让研究员围绕主题产出基础需求分析。
-    research_task = Task(
-        description=(
-            "围绕主题《{topic}》做需求分析。请输出：目标用户、核心痛点、"
-            "三个典型使用场景、Demo 成功标准、最小可行范围。"
+    # 第四个 agent：在完整报告之外，额外生成便于快速阅读和决策的精简报告。
+    summarizer = Agent(
+        role="Executive Summarizer",
+        goal="把完整分析和建议压缩成重点明确、可快速阅读的中文精简报告。",
+        backstory=(
+            "你是一名擅长高密度表达的总结者，能够保留结论、关键理由、"
+            "优先行动和主要风险，同时删除重复解释和次要细节。"
         ),
-        expected_output="一份结构清晰的中文需求分析，包含可直接给下游 agent 使用的要点。",
-        agent=researcher,
+        llm=model_name,
+        verbose=True,
     )
 
-    # 任务 2 依赖任务 1。CrewAI 会把需求分析结果作为上下文传给架构师。
-    design_task = Task(
+    # 任务 1 不依赖前置上下文，用于围绕主题产出结构化问题分析。
+    analysis_task = Task(
         description=(
-            "基于上一步需求分析，设计一个多 agent Demo 方案。请说明："
-            "agent 角色分工、协作流程、输入输出、关键提示词思路、"
-            "最小代码结构和一次完整演示步骤。"
+            "围绕主题《{topic}》做通用问题分析。请输出：问题背景、核心目标、"
+            "关键事实与假设、利益相关方、约束条件、主要矛盾、成功标准、"
+            "仍需澄清的问题。"
         ),
-        expected_output="一份中文多 agent Demo 设计方案，足够让开发者开始实现。",
-        agent=architect,
-        context=[research_task],
+        expected_output="一份结构清晰的中文问题分析，包含可直接给下游 agent 使用的要点。",
+        agent=analyst,
     )
 
-    # 任务 3 依赖任务 2。评审员会检查设计方案，并在识别风险后给出最终建议。
+    # 任务 2 依赖任务 1。CrewAI 会把问题分析结果作为上下文传给方案设计者。
+    solution_task = Task(
+        description=(
+            "基于上一步问题分析，设计一套可执行的解决方案。请说明："
+            "总体思路、可选方案对比、推荐方案、执行步骤、资源需求、"
+            "优先级、里程碑、验证指标和应急预案。"
+        ),
+        expected_output="一份中文解决方案报告，足够让执行者开始落地。",
+        agent=solver,
+        context=[analysis_task],
+    )
+
+    # 任务 3 依赖任务 2。评审员会检查解决方案，并在识别风险后给出完整报告。
     review_task = Task(
         description=(
-            "评审上一步方案。请指出主要风险、遗漏点、可以简化的地方，"
-            "然后给出一版最终建议。最终建议要保留多 agent 协作的学习价值，"
-            "但避免为了炫技而复杂化。"
+            "评审上一步解决方案。请指出主要风险、遗漏点、脆弱假设、"
+            "可以简化的地方和需要补充的数据，然后给出一版最终完整报告。"
+            "最终报告需要包含：问题定义、推荐方案、执行计划、风险控制、"
+            "验证指标和下一步行动。"
         ),
-        expected_output="一份中文评审意见和最终推荐方案。",
+        expected_output="一份中文完整报告，包含评审意见和最终推荐方案。",
         agent=reviewer,
-        context=[design_task],
+        context=[solution_task],
     )
 
-    # 按固定顺序运行所有 agent：先研究，再设计，最后评审，便于检查和调试输出。
+    # 任务 4 依赖任务 3。总结者会在完整报告之外生成一份更短的精简报告。
+    summary_task = Task(
+        description=(
+            "基于完整报告生成一份额外的中文精简报告。请控制在 500 字以内，"
+            "保留：一句话结论、最重要的 3 个理由、优先行动、最大风险、"
+            "需要立即确认的问题。不要重复完整报告中的长段解释。"
+        ),
+        expected_output="一份 500 字以内的中文精简报告，适合快速阅读和转发。",
+        agent=summarizer,
+        context=[review_task],
+    )
+
+    # 按固定顺序运行所有 agent：先分析，再解法设计，再评审，最后总结。
     return Crew(
-        agents=[researcher, architect, reviewer],
-        tasks=[research_task, design_task, review_task],
+        agents=[analyst, solver, reviewer, summarizer],
+        tasks=[analysis_task, solution_task, review_task, summary_task],
         process=Process.sequential,
         verbose=True,
     )
@@ -124,19 +157,27 @@ def main() -> None:
             "缺少 API key。请复制 .env.example 为 .env，并填入 DEEPSEEK_API_KEY。"
         )
 
-    topic = " ".join(sys.argv[1:]).strip() or "给个人知识管理用户做一个 AI 知识库助手"
+    topic = " ".join(sys.argv[1:]).strip() or "分析并解决一个需要多方权衡的复杂问题"
     # 如果命令行传入了参数，就作为主题；否则使用上面的内置演示主题。
     crew = build_crew(topic)
     # 启动 CrewAI 工作流。inputs 中的 topic 会对应任务描述里的 {topic} 占位符。
     result = crew.kickoff(inputs={"topic": topic})
 
-    # 将最终结果保存到文件，方便后续查看；同时也打印到终端，便于立即确认输出。
+    # 将完整报告和精简报告分别保存到文件，方便后续查看；同时也打印到终端。
     OUTPUT_DIR.mkdir(exist_ok=True)
-    OUTPUT_FILE.write_text(str(result), encoding="utf-8")
+    task_outputs = getattr(result, "tasks_output", None) or []
+    full_report = task_output_text(task_outputs[2]) if len(task_outputs) >= 3 else str(result)
+    concise_report = task_output_text(task_outputs[3]) if len(task_outputs) >= 4 else str(result)
 
-    print("\n\n===== FINAL RESULT =====\n")
-    print(result)
+    OUTPUT_FILE.write_text(full_report, encoding="utf-8")
+    SUMMARY_FILE.write_text(concise_report, encoding="utf-8")
+
+    print("\n\n===== FULL REPORT =====\n")
+    print(full_report)
     print(f"\n已保存到: {OUTPUT_FILE}")
+    print("\n\n===== CONCISE REPORT =====\n")
+    print(concise_report)
+    print(f"\n精简报告已保存到: {SUMMARY_FILE}")
 
 
 if __name__ == "__main__":
