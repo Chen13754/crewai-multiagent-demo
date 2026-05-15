@@ -30,8 +30,6 @@ $env:PIP_CACHE_DIR="$PWD\.cache\pip"
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-在当前 Codex 工作区里，我会优先使用内置 Python 创建 `.venv`。
-
 ## 配置
 
 复制 `.env.example` 为 `.env`，填入你的 API key：
