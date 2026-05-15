@@ -1,0 +1,13 @@
+# Copy this file to .env and fill in your DeepSeek API key before running the demo.
+# CrewAI recognizes the "deepseek/" provider prefix and uses DeepSeek's
+# OpenAI-compatible API.
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+MODEL=deepseek/deepseek-v4-flash
+
+# Keep CrewAI runtime data inside this project.
+CREWAI_STORAGE_DIR=.cache/crewai
+CREWAI_DISABLE_TELEMETRY=true
+CREWAI_TRACING_ENABLED=false
+CREWAI_TESTING=true
+OTEL_SDK_DISABLED=true
