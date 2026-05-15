@@ -17,7 +17,7 @@
 - pip 下载缓存：`.cache/pip/`
 - CrewAI 运行存储：`.cache/crewai/`
 - Windows 应用数据兼容目录：`.cache/localappdata/`
-- 运行输出：`outputs/`
+- 运行输出：`outputs/` 下按每次运行时间创建的子目录
 - 密钥配置：`.env`
 
 ## 初始化
@@ -64,5 +64,13 @@ OTEL_SDK_DISABLED=true
 .\.venv\Scripts\python.exe .\src\main.py "如何降低一个小团队的软件交付延期风险"
 ```
 
-完整报告会打印到终端，并保存到 `outputs/latest_result.md`。
-精简报告会额外打印到终端，并保存到 `outputs/latest_summary.md`。
+每次运行都会在 `outputs/` 下创建一个新的时间戳目录，例如：
+
+```text
+outputs/20260515_142030/
+```
+
+其中包含：
+
+- `full_report.md`：完整报告
+- `summary_report.md`：精简报告

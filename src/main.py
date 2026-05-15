@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,8 +12,6 @@ from dotenv import load_dotenv
 # 基于当前文件位置计算项目级路径，这样无论从哪个目录启动脚本都能找到资源。
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "outputs"
-OUTPUT_FILE = OUTPUT_DIR / "latest_result.md"
-SUMMARY_FILE = OUTPUT_DIR / "latest_summary.md"
 CREWAI_STORAGE_DIR = ROOT / ".cache" / "crewai"
 LOCAL_APP_DATA = ROOT / ".cache" / "localappdata"
 
@@ -31,6 +30,20 @@ def task_output_text(task_output: object) -> str:
     # CrewAI 的任务输出通常有 raw 字段；如果版本不同，就退回到字符串形式。
     raw = getattr(task_output, "raw", None)
     return str(raw if raw is not None else task_output)
+
+
+def create_output_run_dir() -> Path:
+    # 每次运行都创建独立目录，避免覆盖之前生成的完整报告和精简报告。
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = OUTPUT_DIR / timestamp
+    suffix = 1
+
+    while run_dir.exists():
+        run_dir = OUTPUT_DIR / f"{timestamp}_{suffix:02d}"
+        suffix += 1
+
+    run_dir.mkdir(parents=True)
+    return run_dir
 
 
 def build_crew(topic: str) -> Crew:
@@ -177,21 +190,23 @@ def main() -> None:
     # 启动 CrewAI 工作流。inputs 中的 topic 会对应任务描述里的 {topic} 占位符。
     result = crew.kickoff(inputs={"topic": topic})
 
-    # 将完整报告和精简报告分别保存到文件，方便后续查看；同时也打印到终端。
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    # 将完整报告和精简报告分别保存到本次运行的独立目录，避免覆盖历史结果。
+    run_dir = create_output_run_dir()
+    output_file = run_dir / "full_report.md"
+    summary_file = run_dir / "summary_report.md"
     task_outputs = getattr(result, "tasks_output", None) or []
     full_report = task_output_text(task_outputs[2]) if len(task_outputs) >= 3 else str(result)
     concise_report = task_output_text(task_outputs[3]) if len(task_outputs) >= 4 else str(result)
 
-    OUTPUT_FILE.write_text(full_report, encoding="utf-8")
-    SUMMARY_FILE.write_text(concise_report, encoding="utf-8")
+    output_file.write_text(full_report, encoding="utf-8")
+    summary_file.write_text(concise_report, encoding="utf-8")
 
     print("\n\n===== FULL REPORT =====\n")
     print(full_report)
-    print(f"\n已保存到: {OUTPUT_FILE}")
+    print(f"\n已保存到: {output_file}")
     print("\n\n===== CONCISE REPORT =====\n")
     print(concise_report)
-    print(f"\n精简报告已保存到: {SUMMARY_FILE}")
+    print(f"\n精简报告已保存到: {summary_file}")
 
 
 if __name__ == "__main__":
