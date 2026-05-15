@@ -1,4 +1,7 @@
 param(
+    [ValidateSet("flash", "pro")]
+    [string]$Model = "",
+
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Topic
 )
@@ -15,7 +18,7 @@ if (-not (Test-Path $Python)) {
 }
 
 if (-not (Test-Path $EnvFile)) {
-    Write-Error ".env not found. Run: Copy-Item .env.example .env, then fill DEEPSEEK_API_KEY."
+    Write-Error ".env not found. Run: Copy-Item .env.template .env, then fill DEEPSEEK_API_KEY."
 }
 
 # Keep CrewAI's unicode logs readable in Windows terminals.
@@ -25,11 +28,19 @@ chcp 65001 > $null
 Push-Location $ProjectRoot
 try {
     $ResolvedTopic = ($Topic -join " ").Trim()
+    $Args = @()
+
+    if (-not [string]::IsNullOrWhiteSpace($Model)) {
+        $Args += "--model"
+        $Args += $Model
+    }
+
     if ([string]::IsNullOrWhiteSpace($ResolvedTopic)) {
-        & $Python $Main
+        & $Python $Main @Args
     }
     else {
-        & $Python $Main $ResolvedTopic
+        $Args += $ResolvedTopic
+        & $Python $Main @Args
     }
 }
 finally {

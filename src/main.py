@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import os
-import sys
+from argparse import ArgumentParser, Namespace
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 
 from dotenv import load_dotenv
 
@@ -14,6 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "outputs"
 CREWAI_STORAGE_DIR = ROOT / ".cache" / "crewai"
 LOCAL_APP_DATA = ROOT / ".cache" / "localappdata"
+MODEL_ALIASES = {
+    "flash": "deepseek-v4-flash",
+    "pro": "deepseek-v4-pro",
+}
+CREWAI_PROVIDER_PREFIX = "deepseek/"
 
 # CrewAI reads these at import time, so keep them before importing crewai.
 os.environ.setdefault("CREWAI_STORAGE_DIR", str(CREWAI_STORAGE_DIR))
@@ -32,6 +38,50 @@ def task_output_text(task_output: object) -> str:
     return str(raw if raw is not None else task_output)
 
 
+def parse_args() -> Namespace:
+    default_model = default_model_alias()
+
+    parser = ArgumentParser(description="运行通用问题解决多 Agent 工作流。")
+    parser.add_argument(
+        "--model",
+        choices=sorted(MODEL_ALIASES),
+        default=default_model,
+        help="选择 DeepSeek 模型档位：flash 更快，pro 能力更强。",
+    )
+    parser.add_argument("topic", nargs="*", help="要分析和解决的问题主题。")
+    return parser.parse_args()
+
+
+def default_model_alias() -> str:
+    configured_alias = os.getenv("MODEL_VARIANT", "")
+    if configured_alias in MODEL_ALIASES:
+        return configured_alias
+
+    configured_model = (
+        os.getenv("MODEL")
+        or os.getenv("MODEL_NAME")
+        or os.getenv("OPENAI_MODEL_NAME")
+        or ""
+    )
+    for alias, model_name in MODEL_ALIASES.items():
+        if configured_model in {model_name, crewai_model_name(model_name)}:
+            return alias
+
+    return "flash"
+
+
+def formal_model_name(model_alias: str) -> str:
+    # 命令行模型选择优先；如果传入未知别名，则退回到 flash。
+    return MODEL_ALIASES.get(model_alias, MODEL_ALIASES["flash"])
+
+
+def crewai_model_name(model_name: str) -> str:
+    # CrewAI/LiteLLM 需要 deepseek/ 前缀来识别供应商；DeepSeek 正式模型名本身不带该前缀。
+    if model_name.startswith(CREWAI_PROVIDER_PREFIX):
+        return model_name
+    return f"{CREWAI_PROVIDER_PREFIX}{model_name}"
+
+
 def create_output_run_dir() -> Path:
     # 每次运行都创建独立目录，避免覆盖之前生成的完整报告和精简报告。
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -46,15 +96,85 @@ def create_output_run_dir() -> Path:
     return run_dir
 
 
-def build_crew(topic: str) -> Crew:
-    # 优先使用环境变量中显式配置的模型；如果没有配置，则使用 DeepSeek 默认模型。
-    model_name = (
-        os.getenv("MODEL")
-        or os.getenv("MODEL_NAME")
-        or os.getenv("OPENAI_MODEL_NAME")
-        or "deepseek/deepseek-v4-flash"
-    )
+def usage_to_dict(usage: object | None) -> dict[str, int]:
+    if usage is None:
+        return {}
 
+    if hasattr(usage, "model_dump"):
+        dumped = usage.model_dump()
+        return {key: int(value) for key, value in dumped.items() if isinstance(value, int)}
+
+    if isinstance(usage, dict):
+        return {key: int(value) for key, value in usage.items() if isinstance(value, int)}
+
+    fields = (
+        "total_tokens",
+        "prompt_tokens",
+        "cached_prompt_tokens",
+        "completion_tokens",
+        "reasoning_tokens",
+        "cache_creation_tokens",
+        "successful_requests",
+    )
+    return {
+        field: int(value)
+        for field in fields
+        if isinstance((value := getattr(usage, field, None)), int)
+    }
+
+
+def extract_token_usage(result: object, crew: Crew) -> dict[str, int]:
+    # CrewAI 版本不同，token 统计可能挂在 result.token_usage 或 crew.usage_metrics 上。
+    for usage in (
+        getattr(result, "token_usage", None),
+        getattr(result, "usage_metrics", None),
+        getattr(crew, "usage_metrics", None),
+        getattr(crew, "token_usage", None),
+    ):
+        usage_dict = usage_to_dict(usage)
+        if usage_dict.get("total_tokens", 0) > 0:
+            return usage_dict
+    return {}
+
+
+def write_run_metadata(
+    metadata_file: Path,
+    *,
+    topic: str,
+    model_alias: str,
+    model_name: str,
+    crewai_model: str,
+    elapsed_seconds: float,
+    token_usage: dict[str, int],
+) -> None:
+    lines = [
+        "# 运行元数据",
+        "",
+        f"- 主题：{topic}",
+        f"- 模型档位：{model_alias}",
+        f"- 模型正式名：{model_name}",
+        f"- CrewAI 模型字符串：{crewai_model}",
+        f"- 总用时：{elapsed_seconds:.2f} 秒",
+    ]
+
+    if token_usage:
+        lines.extend(
+            [
+                f"- 总 token：{token_usage.get('total_tokens', 0)}",
+                f"- 输入 token：{token_usage.get('prompt_tokens', 0)}",
+                f"- 输出 token：{token_usage.get('completion_tokens', 0)}",
+                f"- 缓存输入 token：{token_usage.get('cached_prompt_tokens', 0)}",
+                f"- 推理 token：{token_usage.get('reasoning_tokens', 0)}",
+                f"- 成功请求数：{token_usage.get('successful_requests', 0)}",
+            ]
+        )
+    else:
+        lines.append("- token 用量：当前 CrewAI/模型返回中未读取到 token 统计。")
+
+    metadata_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def build_crew(topic: str, model_name: str) -> Crew:
     # 第一个 agent：把问题背景拆解清楚，识别目标、约束、相关方和关键矛盾。
     analyst = Agent(
         role="Problem Analyst",
@@ -177,29 +297,45 @@ def build_crew(topic: str) -> Crew:
 def main() -> None:
     # 先加载本地 .env 配置，再检查 API key 或选择模型；已有环境变量仍然优先生效。
     load_dotenv(ROOT / ".env")
+    args = parse_args()
 
     # CrewAI 需要大模型服务的 API key；这里同时支持 DeepSeek 和 OpenAI。
     if not (os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")):
         raise SystemExit(
-            "缺少 API key。请复制 .env.example 为 .env，并填入 DEEPSEEK_API_KEY。"
+            "缺少 API key。请复制 .env.template 为 .env，并填入 DEEPSEEK_API_KEY。"
         )
 
-    topic = " ".join(sys.argv[1:]).strip() or "分析并解决一个需要多方权衡的复杂问题"
+    model_name = formal_model_name(args.model)
+    crewai_model = crewai_model_name(model_name)
+    topic = " ".join(args.topic).strip() or "分析并解决一个需要多方权衡的复杂问题"
     # 如果命令行传入了参数，就作为主题；否则使用上面的内置演示主题。
-    crew = build_crew(topic)
+    crew = build_crew(topic, crewai_model)
     # 启动 CrewAI 工作流。inputs 中的 topic 会对应任务描述里的 {topic} 占位符。
+    started_at = perf_counter()
     result = crew.kickoff(inputs={"topic": topic})
+    elapsed_seconds = perf_counter() - started_at
+    token_usage = extract_token_usage(result, crew)
 
     # 将完整报告和精简报告分别保存到本次运行的独立目录，避免覆盖历史结果。
     run_dir = create_output_run_dir()
     output_file = run_dir / "full_report.md"
     summary_file = run_dir / "summary_report.md"
+    metadata_file = run_dir / "run_metadata.md"
     task_outputs = getattr(result, "tasks_output", None) or []
     full_report = task_output_text(task_outputs[2]) if len(task_outputs) >= 3 else str(result)
     concise_report = task_output_text(task_outputs[3]) if len(task_outputs) >= 4 else str(result)
 
     output_file.write_text(full_report, encoding="utf-8")
     summary_file.write_text(concise_report, encoding="utf-8")
+    write_run_metadata(
+        metadata_file,
+        topic=topic,
+        model_alias=args.model,
+        model_name=model_name,
+        crewai_model=crewai_model,
+        elapsed_seconds=elapsed_seconds,
+        token_usage=token_usage,
+    )
 
     print("\n\n===== FULL REPORT =====\n")
     print(full_report)
@@ -207,6 +343,17 @@ def main() -> None:
     print("\n\n===== CONCISE REPORT =====\n")
     print(concise_report)
     print(f"\n精简报告已保存到: {summary_file}")
+    print("\n\n===== RUN STATS =====\n")
+    print(f"模型: {args.model} ({model_name})")
+    print(f"CrewAI 模型字符串: {crewai_model}")
+    print(f"总用时: {elapsed_seconds:.2f} 秒")
+    if token_usage:
+        print(f"总 token: {token_usage.get('total_tokens', 0)}")
+        print(f"输入 token: {token_usage.get('prompt_tokens', 0)}")
+        print(f"输出 token: {token_usage.get('completion_tokens', 0)}")
+    else:
+        print("token 用量: 当前 CrewAI/模型返回中未读取到 token 统计。")
+    print(f"运行元数据已保存到: {metadata_file}")
 
 
 if __name__ == "__main__":

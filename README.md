@@ -33,10 +33,10 @@ $env:PIP_CACHE_DIR="$PWD\.cache\pip"
 
 ## 配置
 
-复制 `.env.example` 为 `.env`，填入你的 API key：
+复制 `.env.template` 为 `.env`，填入你的 API key：
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item .env.template .env
 ```
 
 然后编辑 `.env`：
@@ -44,7 +44,7 @@ Copy-Item .env.example .env
 ```text
 DEEPSEEK_API_KEY=sk-...
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-MODEL=deepseek/deepseek-v4-flash
+MODEL_VARIANT=flash
 CREWAI_STORAGE_DIR=.cache/crewai
 CREWAI_DISABLE_TELEMETRY=true
 CREWAI_TRACING_ENABLED=false
@@ -58,10 +58,31 @@ OTEL_SDK_DISABLED=true
 .\.venv\Scripts\python.exe .\src\main.py
 ```
 
+切换模型档位：
+
+```powershell
+.\.venv\Scripts\python.exe .\src\main.py --model flash
+.\.venv\Scripts\python.exe .\src\main.py --model pro
+```
+
+模型档位对应 DeepSeek 正式模型名：
+
+- `flash`：`deepseek-v4-flash`
+- `pro`：`deepseek-v4-pro`
+
+脚本内部会自动加上 CrewAI/LiteLLM 需要的 `deepseek/` 供应商前缀。
+
 传入自定义主题：
 
 ```powershell
 .\.venv\Scripts\python.exe .\src\main.py "如何降低一个小团队的软件交付延期风险"
+```
+
+使用 `run.ps1` 时也可以切换模型：
+
+```powershell
+.\run.ps1 -Model flash "如何降低一个小团队的软件交付延期风险"
+.\run.ps1 -Model pro "如何降低一个小团队的软件交付延期风险"
 ```
 
 每次运行都会在 `outputs/` 下创建一个新的时间戳目录，例如：
@@ -74,3 +95,4 @@ outputs/20260515_142030/
 
 - `full_report.md`：完整报告
 - `summary_report.md`：精简报告
+- `run_metadata.md`：本次运行的模型、总用时和 token 用量
