@@ -54,6 +54,32 @@ OTEL_SDK_DISABLED=true
 
 ## 运行
 
+### 可视化界面
+
+推荐使用可视化界面运行和调整多 Agent 工作流：
+
+```powershell
+.\ui.ps1
+```
+
+或者：
+
+```powershell
+.\run.ps1 -Ui
+```
+
+启动后浏览器会打开 Streamlit 页面。界面支持：
+
+- 选择模型档位：`flash` 或 `pro`
+- 输入主题并运行多 Agent 工作流
+- 查看运行过程、任务输出、完整报告和精简报告
+- 查看历史输出
+- 在“配置”页新增、删除、启用、禁用和修改 agent/task
+
+说明：界面展示的是 CrewAI 公开事件、任务状态、任务输出和日志，不展示模型隐藏推理链。隐藏推理链通常不会由模型/API 暴露，也不应伪造展示。
+
+### 命令行
+
 ```powershell
 .\.venv\Scripts\python.exe .\src\main.py
 ```
@@ -96,3 +122,14 @@ outputs/20260515_142030/
 - `full_report.md`：完整报告
 - `summary_report.md`：精简报告
 - `run_metadata.md`：本次运行的模型、总用时和 token 用量
+- `events.json`：可视化界面使用的公开运行事件
+- `tasks/`：每个 task 的单独输出
+
+## 配置 agent 和 task
+
+默认配置放在：
+
+- `config/agents.json`
+- `config/tasks.json`
+
+你可以在可视化界面的“配置”页编辑，也可以直接改 JSON 文件。task 通过 `agent_id` 指定调用哪个 agent，通过 `context_task_ids` 指定依赖哪些前置 task。
